@@ -2,18 +2,22 @@
 
 ## About
 
+This project is intended to serve as a framework for automating the hardening of CCDC Linux systems. In the event that future Cyber Defense Team generations are interested in using this, feel free to fork the repository and merge it into https://github.com/SDSU-Cyber-Defense-Team/competitions-info (or whatever repo you guys are using to host CCDC stuff on). If you wish to add additional automation, simply create a new .sh file and edit `run_all.sh` and `coordinate_deploy.sh` to include logic for executing it.
+
+Created by Alexander Zucker as a project for the Spring CS 574 course.
+
 ### Problem Statement
 
-As we learned from the 2025-2026 WRCCDC season, effective performance in this competition requires automation. Red team obtains default credentials at or very shortly after they are distributed to blue team, and they begin leveraging them to launch attacks by minute 20. This necessitates the ability to remove default credentials across the entire environment without having to interact with each host manually.
+As we learned from the 2025-2026 WRCCDC season, effective performance in this competition requires automation. The red team obtains default credentials at or very shortly after they are distributed to the blue team, and they begin leveraging them to launch attacks by minute 20. This necessitates the ability to remove default credentials across the entire environment without having to interact with each host manually. Additionally, we cannot afford to waste time performing tasks like establishing our failsafe administrator account or pruning extraneous local users.
 
 ### Tech Stack
 
-- Shell scripts use `/usr/bin/env sh` as their shebang. It is important that these scripts be as portable as possible across Linux distributions and versions, so `sh` is preferable over `bash`.
+- Shell scripts use `/usr/bin/env sh` as their shebang. It is important that these scripts be as portable as possible across Linux distributions and versions, so I opted for `sh` over `bash`.
 - Coordinate (https://git.sr.ht/~sourque/coordinate) is used to handle remote deployment of the scripts.
   - Coordinate is written in Go, which `setup.sh` will attempt to automatically install if necessary.
 - Git is used by `setup.sh` to clone this repository and the Coordinate repository.
 
-## Components
+### Components
 
 - `failsafe_creator.sh`: creates or normalizes the `failsafe` admin account,
   installs its SSH public key, configures passwordless sudo, and verifies that
@@ -58,7 +62,8 @@ As we learned from the 2025-2026 WRCCDC season, effective performance in this co
 
 3. Edit `deploy/allowlist.txt` so it contains the authorized/PCR accounts for the
    target systems.
-4. Edit the public key in `failsafe_creator.sh`. This is the public key that will be used for root authentication.
+4. Edit the global variable `PUBKEY=` in `failsafe_creator.sh`. This is the public key that
+   will be used for `failsafe` authentication. DO NOT FORGET TO SET THIS, OR YOU WILL HAVE A VERY BAD TIME.
    The script fails if the resulting `failsafe` account cannot use sudo non-interactively.
 5. Make sure Coordinate is available:
 
@@ -76,24 +81,19 @@ As we learned from the 2025-2026 WRCCDC season, effective performance in this co
    The setup script also adds this local PATH entry to `$HOME/.profile` for
    future shells when the fallback path is used.
 
-6. Run Coordinate with the supplied root password:
+6. Run Coordinate. If prompting for the root password causes problems, specify
+   the password by adding `-p <password>` to the command.
 
    ```sh
-   coordinate -y -t <targets> -u root -p 'DEFAULT_ROOT_PASSWORD' -T 90 deploy/coordinate_deploy.sh
+   coordinate -y -t <targets> -u root -T 90 deploy/coordinate_deploy.sh
    ```
+
+### Notes
 
 You can target individual hosts, ranges, CIDRs, or hostnames:
 
 ```sh
-coordinate -y -t 10.0.0.5,10.0.0.10-10.0.0.20,web01 -u root -p 'DEFAULT_ROOT_PASSWORD' -T 90 deploy/coordinate_deploy.sh
-```
-
-Security note: passing `-p` can expose the password in shell history and process
-arguments. If operationally possible, omit `-p` and let Coordinate prompt for the
-password interactively:
-
-```sh
-coordinate -y -t 10.0.0.0/24 -u root -T 90 deploy/coordinate_deploy.sh
+coordinate -y -t 10.0.0.5,10.0.0.10-10.0.0.20,web01 -u root -T 90 deploy/coordinate_deploy.sh
 ```
 
 The Coordinate wrapper creates `/tmp/ccdc` on each target, drops the scripts and
@@ -117,34 +117,34 @@ On each target, the hardening sequence:
 
 ## Local Usage
 
-Create an allowlist containing one authorized local account per line:
+In the event that remote deployment via Coordinate fails, it is still possible to
+execute the scripts locally on each host.
 
-```text
-alice
-bob
-failsafe
-```
+1. Edit `deploy/allowlist.txt` so it contains the authorized/PCR accounts for
+   the target system.
 
-Then run the full hardening sequence as root:
+2. Edit the public key in `failsafe_creator.sh`.
 
-```sh
-sh ./run_all.sh ./deploy/allowlist.txt
-```
+3. Run the full hardening sequence as root:
 
-`run_all.sh` executes `failsafe_creator.sh`, `root_locker.sh`, and
-`user_locker.sh --yes` in that order.
+   ```sh
+   sh ./run_all.sh ./deploy/allowlist.txt
+   ```
 
-`user_locker.sh` still supports interactive review by default:
+   `run_all.sh` executes `failsafe_creator.sh`, `root_locker.sh`, and
+   `user_locker.sh --yes` in that order.
 
-```sh
-sh ./user_locker.sh ./deploy/allowlist.txt
-```
+4. To run only the user-locking step with interactive review:
 
-For automation, use `--yes`:
+   ```sh
+   sh ./user_locker.sh ./deploy/allowlist.txt
+   ```
 
-```sh
-sh ./user_locker.sh --yes ./deploy/allowlist.txt
-```
+5. To run only the user-locking step without interactive review:
+
+   ```sh
+   sh ./user_locker.sh --yes ./deploy/allowlist.txt
+   ```
 
 Useful `user_locker.sh` options:
 
@@ -154,17 +154,3 @@ Useful `user_locker.sh` options:
     --exclude USERS    comma-separated usernames to exclude from lockdown
     --admin USERNAME   admin account to always exclude; default is failsafe
 ```
-
-## Notes
-
-- Run a dry run on one representative host before broad deployment:
-
-  ```sh
-  sh ./user_locker.sh --dry-run ./deploy/allowlist.txt
-  ```
-
-- `root_locker.sh` is intended to run after `failsafe_creator.sh` so an alternate
-  admin path exists before root is locked. `run_all.sh` enforces this order.
-- `user_locker.sh` always skips `root` and the configured admin account.
-- The scripts create timestamped `.bak.YYYYMMDD-HHMMSS` backups before editing
-  sensitive account, sudoers, SSH config, and authorized key files.
