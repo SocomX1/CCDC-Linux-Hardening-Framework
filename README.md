@@ -2,7 +2,7 @@
 
 ## About
 
-This project is intended to serve as a framework for automating the hardening of CCDC Linux systems. In the event that future Cyber Defense Team generations are interested in using this, feel free to fork the repository and merge it into https://github.com/SDSU-Cyber-Defense-Team/competitions-info (or whatever repo you guys are using to host CCDC stuff on). If you wish to add additional automation, simply create a new .sh file and edit `run_all.sh` and `coordinate_deploy.sh` to include logic for executing it.
+This project is intended to serve as a framework for automating the hardening of CCDC Linux systems. In the event that future Cyber Defense Team generations are interested in using this, feel free to fork the repository and merge it into https://github.com/SDSU-Cyber-Defense-Team/competitions-info (or whatever repo you guys are using to host CCDC stuff on). If you wish to add additional automation, create a new `.sh` module in `modules/` and edit `run_all.sh` and `coordinate_deploy.sh` to include logic for executing it.
 
 Created by Alexander Zucker as a project for the Spring CS 574 course.
 
@@ -19,15 +19,22 @@ As we learned from the 2025-2026 WRCCDC season, effective performance in this co
 
 ### Components
 
-- `failsafe_creator.sh`: creates or normalizes the `failsafe` admin account,
+- `modules/failsafe_creator.sh`: creates or normalizes the `failsafe` admin account,
   installs its SSH public key, configures passwordless sudo, and verifies that
   sudo actually works before returning success.
-- `root_locker.sh`: locks the root account, clears root SSH authorized keys, and
+- `modules/copyfail_patcher.sh`: applies no-reboot Copyfail mitigation by checking
+  installed live-patching clients, blocking future `algif_aead` loads, and
+  unloading `algif_aead` from the running kernel when possible.
+- `modules/dirtyfrag_patcher.sh`: applies no-reboot DirtyFrag mitigation by blocking
+  future `esp4`, `esp6`, and `rxrpc` loads, detecting likely IPsec/AFS impact,
+  and unloading those modules when doing so does not appear likely to disrupt
+  dependent services.
+- `modules/root_locker.sh`: locks the root account, clears root SSH authorized keys, and
   disables root SSH login.
-- `user_locker.sh`: locks local login-capable user accounts that are not on an
+- `modules/user_locker.sh`: locks local login-capable user accounts that are not on an
   allowlist, removes supplementary groups, and backs up/removes their SSH
   authorized key files.
-- `run_all.sh`: host-side runner that executes the three hardening scripts in
+- `run_all.sh`: host-side runner that executes the bundled hardening scripts in
   the intended order.
 - `deploy/coordinate_deploy.sh`: Coordinate deployment wrapper for concurrent
   remote execution.
@@ -62,7 +69,7 @@ As we learned from the 2025-2026 WRCCDC season, effective performance in this co
 
 3. Edit `deploy/allowlist.txt` so it contains the authorized/PCR accounts for the
    target systems.
-4. Edit the global variable `PUBKEY=` in `failsafe_creator.sh`. This is the public key that
+4. Edit the global variable `PUBKEY=` in `modules/failsafe_creator.sh`. This is the public key that
    will be used for `failsafe` authentication. DO NOT FORGET TO SET THIS, OR YOU WILL HAVE A VERY BAD TIME.
    The script fails if the resulting `failsafe` account cannot use sudo non-interactively.
 5. Make sure Coordinate is available:
@@ -88,6 +95,14 @@ As we learned from the 2025-2026 WRCCDC season, effective performance in this co
    coordinate -y -t <targets> -u root -T 90 deploy/coordinate_deploy.sh
    ```
 
+   Optional hardening flags can be passed after the deployment wrapper. For
+   example, to force DirtyFrag module unloading even when IPsec/AFS use is
+   detected:
+
+   ```sh
+   coordinate -y -t <targets> -u root -T 90 deploy/coordinate_deploy.sh --dirtyfrag-force
+   ```
+
 ### Notes
 
 You can target individual hosts, ranges, CIDRs, or hostnames:
@@ -96,17 +111,19 @@ You can target individual hosts, ranges, CIDRs, or hostnames:
 coordinate -y -t 10.0.0.5,10.0.0.10-10.0.0.20,web01 -u root -T 90 deploy/coordinate_deploy.sh
 ```
 
-The Coordinate wrapper creates `/tmp/ccdc` on each target, drops the scripts and
-allowlist there, then runs:
+The Coordinate wrapper creates `/tmp/ccdc` on each target, drops the runner,
+modules, and allowlist there, then runs:
 
 ```sh
-sh /tmp/ccdc/run_all.sh /tmp/ccdc/allowlist.txt
+sh /tmp/ccdc/run_all.sh <options> /tmp/ccdc/allowlist.txt
 ```
 
 On each target, the hardening sequence:
 
 - creates or verifies the `failsafe` admin account
 - verifies `failsafe` has usable passwordless sudo
+- attempts no-reboot Copyfail mitigation for the running kernel
+- attempts no-reboot DirtyFrag mitigation for the running kernel
 - locks the root password
 - disables SSH root login using an `sshd_config.d` drop-in when included, or a
   managed main `sshd_config` update otherwise
@@ -123,7 +140,7 @@ execute the scripts locally on each host.
 1. Edit `deploy/allowlist.txt` so it contains the authorized/PCR accounts for
    the target system.
 
-2. Edit the public key in `failsafe_creator.sh`.
+2. Edit the public key in `modules/failsafe_creator.sh`.
 
 3. Run the full hardening sequence as root:
 
@@ -131,19 +148,20 @@ execute the scripts locally on each host.
    sh ./run_all.sh ./deploy/allowlist.txt
    ```
 
-   `run_all.sh` executes `failsafe_creator.sh`, `root_locker.sh`, and
-   `user_locker.sh --yes` in that order.
+   `run_all.sh` executes `modules/failsafe_creator.sh`,
+   `modules/copyfail_patcher.sh`, `modules/dirtyfrag_patcher.sh`,
+   `modules/root_locker.sh`, and `modules/user_locker.sh --yes` in that order.
 
 4. To run only the user-locking step with interactive review:
 
    ```sh
-   sh ./user_locker.sh ./deploy/allowlist.txt
+   sh ./modules/user_locker.sh ./deploy/allowlist.txt
    ```
 
 5. To run only the user-locking step without interactive review:
 
    ```sh
-   sh ./user_locker.sh --yes ./deploy/allowlist.txt
+   sh ./modules/user_locker.sh --yes ./deploy/allowlist.txt
    ```
 
 Useful `user_locker.sh` options:
@@ -153,4 +171,26 @@ Useful `user_locker.sh` options:
 -n, --dry-run          print target accounts without changing the system
     --exclude USERS    comma-separated usernames to exclude from lockdown
     --admin USERNAME   admin account to always exclude; default is failsafe
+```
+
+Useful patcher options:
+
+```text
+run_all.sh:
+      --copyfail-strict      return failure if Copyfail residual risk remains
+      --dirtyfrag-force      unload DirtyFrag modules even if IPsec or AFS use is detected
+      --dirtyfrag-strict     return failure if DirtyFrag residual risk remains
+
+modules/copyfail_patcher.sh:
+  -s, --strict              return failure if residual risk remains
+
+modules/dirtyfrag_patcher.sh:
+  -f, --force               unload modules even if IPsec or AFS use is detected
+  -s, --strict              return failure if residual risk remains
+```
+
+For local use, pass full-sequence options before the allowlist path:
+
+```sh
+sh ./run_all.sh --copyfail-strict --dirtyfrag-force ./deploy/allowlist.txt
 ```

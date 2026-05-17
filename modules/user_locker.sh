@@ -525,8 +525,12 @@ review_and_confirm_targets() {
 #
 backup_system_files() {
     backup_file /etc/passwd
-    [ -r /etc/group ] && backup_file /etc/group || true
-    [ -r /etc/shadow ] && backup_file /etc/shadow || true
+    if [ -r /etc/group ]; then
+        backup_file /etc/group
+    fi
+    if [ -r /etc/shadow ]; then
+        backup_file /etc/shadow
+    fi
 }
 
 #
