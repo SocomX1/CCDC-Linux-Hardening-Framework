@@ -1,5 +1,3 @@
-# CCDC-Resources
-
 ## About
 
 This project is intended to serve as a framework for automating the hardening of CCDC Linux systems. In the event that future Cyber Defense Team generations are interested in using this, feel free to fork the repository and merge it into https://github.com/SDSU-Cyber-Defense-Team/competitions-info (or whatever repo you guys are using to host CCDC stuff on). If you wish to add additional automation, create a new `.sh` module in `modules/` and edit `run_all.sh` and `coordinate_deploy.sh` to include logic for executing it.
